@@ -32,14 +32,14 @@ function base64UrlToBuffer(base64url) {
  */
 async function registerCredential() {
   const userId = "200";
-  const res = await fetch(`${serverUrl}/webauthn/register/${userId}`, {
+  const res = await fetch(`${serverUrl}/webauthn/register/info/${userId}`, {
     method: "GET", // GET 요청
     headers: { "Content-Type": "application/json" }, // 요청 헤더 설정
-    body: JSON.stringify({ userId }),
+    // body: JSON.stringify({ userId }),
   });
   const options = await res.json();
   console.log("Server Response:", options);
-  console.log("Decoded Challenge (ArrayBuffer):", base64UrlToBuffer(options.challenge));
+  console.log("Original Challenge (before API call):", options.challenge);
 
   // 2. WebAuthn API가 요구하는 형식으로 변환
   const publicKeyOptions = {
@@ -68,8 +68,43 @@ async function registerCredential() {
   // 3. WebAuthn API로 credential 생성
   let credential;
   try {
+    const originalChallenge = publicKeyOptions.challenge.slice(0); // ArrayBuffer 복사
+
+console.log("Original Challenge (before API call):", bufferToBase64Url(originalChallenge));
+
     credential = await navigator.credentials.create({ publicKey: publicKeyOptions });
     console.log("Credential:", credential);
+    const attestationResponse = credential.response;
+    const authenticatorData = new Uint8Array(attestationResponse.clientDataJSON);
+
+    // Parse the clientDataJSON to extract the challenge
+    const clientData = JSON.parse(new TextDecoder().decode(authenticatorData));
+    const challenge = clientData.challenge;
+
+    const originalChallengeBuffer = base64UrlToBuffer(options.challenge);
+
+// 2) navigator.credentials.create(...) 후, clientDataJSON에서 꺼낸 challenge 문자열
+const challengeString = clientData.challenge;
+const challengeBufferFromClient = base64UrlToBuffer(challengeString);
+
+// 3) 두 ArrayBuffer가 동일한지 비교
+function isArrayBufferEqual(buf1, buf2) {
+  if (buf1.byteLength !== buf2.byteLength) return false;
+  const view1 = new Uint8Array(buf1);
+  const view2 = new Uint8Array(buf2);
+  for (let i = 0; i < view1.length; i++) {
+    if (view1[i] !== view2[i]) return false;
+  }
+  return true;
+}
+
+console.log(
+  "Are they the same buffer?",
+  isArrayBufferEqual(originalChallenge, challengeBufferFromClient)
+);
+    // Log the Base64URL-encoded challenge
+    console.log("before: " + bufferToBase64Url(publicKeyOptions.challenge));
+    console.log("Base64URL Encoded Challenge:", challenge);
   } catch (err) {
     console.error("Registration error:", err);
     document.getElementById("result").innerText = "등록 에러: " + err.message;
@@ -102,24 +137,31 @@ async function registerCredential() {
  */
 async function loginCredential() {
   // 1. 서버에서 PublicKeyCredentialRequestOptions 받아오기
-  const res = await fetch(`${serverUrl}/auth/options`);
+  const userId = "200";
+  const res = await fetch(`${serverUrl}/webauthn/auth/${userId}`, {
+    method: "GET", // GET 요청
+    headers: { "Content-Type": "application/json" }, // 요청 헤더 설정
+    // body: JSON.stringify({ userId }),
+  });
   const options = await res.json();
+  console.log("Server Response:", options);
 
-  // 2. ArrayBuffer로 변환
-  options.publicKey.challenge = base64UrlToBuffer(options.publicKey.challenge);
-  if (options.publicKey.allowCredentials) {
-    options.publicKey.allowCredentials = options.publicKey.allowCredentials.map((cred) => {
-      return {
-        ...cred,
-        id: base64UrlToBuffer(cred.id),
-      };
-    });
-  }
+  const authOptions = {
+    publicKey: {
+      challenge: base64UrlToBuffer(options.challenge),
+      allowCredentials: options.allowCredentials.map(param => ({
+        id: base64UrlToBuffer(param.id),
+        type: param.type,
+      })),
+      userVerification: options.userVerification,
+    },
+  };
 
   // 3. WebAuthn API로 credential 요청(로그인)
   let assertion;
   try {
-    assertion = await navigator.credentials.get(options);
+    assertion = await navigator.credentials.get(authOptions);
+    console.log("Assertion: ", assertion);
   } catch (err) {
     console.error("Login error:", err);
     document.getElementById("result").innerText = "로그인 에러: " + err;
@@ -141,7 +183,7 @@ async function loginCredential() {
     },
   };
 
-  const res2 = await fetch(`${serverUrl}/auth/response`, {
+  const res2 = await fetch(`${serverUrl}/webauthn/auth/${userId}`, {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify(assertionData),
@@ -152,8 +194,5 @@ async function loginCredential() {
 
 
 // 이벤트 바인딩
-document.getElementById("registerBtn").addEventListener("click", registerCredential, () => {
-  console.log("Register button clicked!"); // 버튼 클릭 시 로그 출력
-  registerCredential();
-});
+document.getElementById("registerBtn").addEventListener("click", registerCredential);
 document.getElementById("loginBtn").addEventListener("click", loginCredential);
