@@ -13,7 +13,7 @@ module.exports = {
     },
     devServer: {
         liveReload: true,
-        port: 3000, // 원하는 포트 번호 설정
+        port: 3010, // 원하는 포트 번호 설정
         static: './dist', // 정적 파일 경로
         hot: true, // 핫 리로딩 활성화
         open: true,
